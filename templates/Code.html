@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Text Detection</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-SgOJa3DmI69IUzQ2PVdRZhwQ+dy64/BUtbMJw1MZ8t5HZApcHrRKUc4W0kG879m7" crossorigin="anonymous">
+    <link rel="stylesheet" href="{{ url_for('static', filename='main.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='all.css') }}">
+</head>
+<body>
+    <div class="cover-container d-flex w-100 p-3 mx-auto flex-column"> 
+        <header class="mb-auto"> 
+            <div> 
+                <h3 class="float-md-start mb-0">Cover</h3> 
+                <nav class="nav nav-masthead justify-content-center float-md-end"> 
+                    <a class="nav-link fw-bold p-1 " aria-current="page" href="{{url_for('index')}}">Home</a> 
+                    <a class="nav-link fw-bold p-1 " href="{{url_for('Report')}}">Report</a> 
+                    <a class="nav-link fw-bold p-1 active" href="{{url_for('Code')}}">Code</a> 
+                </nav> 
+            </div> 
+        </header>
+    </div> 
+
+    <div class="m-2 text-start">
+        <h1> preprocess_image(image) </h1>
+        <ul class="list-group m-4">
+            <li class="list-group-item"> Converts the image to grayscale. </li>
+            <li class="list-group-item"> Applies CLAHE for contrast enhancement. </li>
+            <li class="list-group-item"> Performs morphological closing to reduce noise. </li>
+        </ul>
+        <pre class="code">
+            def preprocess_image(image):
+                clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+                gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+                enhanced = clahe.apply(gray)
+                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+                closed = cv2.morphologyEx(enhanced, cv2.MORPH_CLOSE, kernel)
+                return closed
+        </pre>
+    </div>
+
+    <div class="m-2 text-start">
+        <h1> detect_text_regions(image) </h1>
+        <ul class="list-group m-4">
+            <li class="list-group-item"> Uses MSER to detect text regions.</li>
+            <li class="list-group-item"> Returns bounding box coordinates. </li>
+        </ul>
+        <pre class="code">
+            def detect_text_regions(image):
+                mser = cv2.MSER_create()
+                regions, _ = mser.detectRegions(image)
+                bboxes = [cv2.boundingRect(p.reshape(-1, 1, 2)) for p in regions]
+                return bboxes
+        </pre>
+    </div>
+
+    <div class="m-2 text-start">
+        <h1> cluster_regions(bboxes, eps=13) </h1>
+        <ul class="list-group m-4">
+            <li class="list-group-item"> Computes centroids of bounding boxes.</li>
+            <li class="list-group-item"> Applies DBSCAN to cluster nearby regions. </li>
+            <li class="list-group-item"> Returns grouped bounding boxes. </li>
+        </ul>
+        <pre class="code">
+            def cluster_regions(bboxes, eps=13):
+                centroids = np.array([[x + w/2, y + h/2] for (x, y, w, h) in bboxes])
+                dbscan = DBSCAN(eps=eps, min_samples=2)
+                labels = dbscan.fit_predict(centroids)
+                clusters = {}
+                for label, bbox in zip(labels, bboxes):
+                    if label == -1:  # noise
+                        continue
+                    clusters.setdefault(label, []).append(bbox)
+                return clusters
+        </pre>
+    </div>
+
+    <div class="m-2 text-start">
+        <h1> merge_bboxes(bboxes)</h1>
+        <ul class="list-group m-4">
+            <li class="list-group-item"> Merges overlapping or nearby bounding boxes into a single detection. </li>
+        </ul>
+        <pre class="code">
+           def merge_bboxes(bboxes):
+                x_min = min(b[0] for b in bboxes)
+                y_min = min(b[1] for b in bboxes)
+                x_max = max(b[0] + b[2] for b in bboxes)
+                y_max = max(b[1] + b[3] for b in bboxes)
+                return (x_min, y_min, x_max - x_min, y_max - y_min)
+        </pre>
+    </div>
+
+    <div class="m-2 text-start">
+        <h1> extract_text_from_clusters(image, eps, preprocess=True)</h1>
+        <ul class="list-group m-4">
+            <li class="list-group-item"> Combines preprocessing, detection, clustering, and merging.</li>
+            <li class="list-group-item"> Returns the image with detected text regions highlighted.</li>
+        </ul>
+        <pre class="code">
+           def extract_text_from_clusters(image, eps, preprocess=True):
+                image_copy = image.copy()
+                if preprocess:
+                    image_copy = preprocess_image(image)
+                bboxes = detect_text_regions(image_copy)
+                clusters = cluster_regions(bboxes,eps)
+                merged_bboxes = [merge_bboxes(cluster) for cluster in clusters.values()]
+                for (x, y, w, h) in merged_bboxes:
+                    cv2.rectangle(image_copy, (x, y), (x + w, y + h), (0), 2)
+                return image_copy
+        </pre>
+    </div>
+
+    <div class="m-2 text-start">
+        <h1> run(img, eps)</h1>
+        <ul class="list-group m-4">
+            <li class="list-group-item"> run the comining between the preivous functions </li>
+            <li class="list-group-item"> store the new images </li>
+        </ul>
+        <pre class="code">
+           def run(img, eps):
+                image = cv2.imread(img)
+                text_from_image = extract_text_from_clusters(image, eps, preprocess=False)
+                text_from_preprocessed_image = extract_text_from_clusters(image, eps, preprocess=True)
+                base = os.path.splitext(os.path.basename(img))[0]
+                out1_name = f"{base}_output1_{uuid.uuid4().hex[:6]}.jpg"
+                out2_name = f"{base}_output2_{uuid.uuid4().hex[:6]}.jpg"
+                out1_path = os.path.join("static/uploads", out1_name)
+                out2_path = os.path.join("static/uploads", out2_name)                
+                cv2.imwrite(out1_path, text_from_image)
+                cv2.imwrite(out2_path, text_from_preprocessed_image)
+                return out1_name, out2_name
+        </pre>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/js/bootstrap.bundle.min.js" integrity="sha384-k6d4wzSIapyDyv1kpU366/PK5hCdSbCRGRCMv+eplOQJWyd1fbcAu9OCUj5zNLiq" crossorigin="anonymous"></script>
+    <script src="{{ url_for('static', filename='all.js') }}"></script>
+</body>
+</html>
